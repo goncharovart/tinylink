@@ -21,3 +21,6 @@ vendor/
 data/
 bin/
 dist/
+
+# Local scratch / work-in-progress files that should never reach origin
+.stash/
