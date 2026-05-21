@@ -70,9 +70,26 @@ produced row 2 of the table.
 
 ## Status
 
-Currently scaffolding (stage 0). Following pieces are being assembled in
-order: HTTP routes → Postgres repo → tests → first measurements →
-optimizations.
+Stage 0 (naive baseline) and **stage 1 (tuned `pgxpool`)** are in. Stage 0
+shipped the `chi` + `pgx` skeleton with `database/sql`-style defaults
+(MaxConns ≈ GOMAXPROCS, no warm pool, no proactive health checks).
+Stage 1 swaps that for a deliberately tuned `pgxpool.Config`:
+
+- `MaxConns = 20` (≈ 2-3× CPU cores)
+- `MinConns = 4` (warm pool absorbs first-burst latency)
+- `MaxConnLifetime = 30m`, `MaxConnIdleTime = 5m` — rotate vs. pgbouncer
+- `HealthCheckPeriod = 1m` — fail fast on dead connections
+
+Reproducible benchmark:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+k6 run --env BASE=http://localhost:8080 benchmarks/redirect-load.js
+```
+
+Stage 2 (Redis cache-aside) and stage 3 (`sync.Pool` + escape-analysis
+fixes) are next — each its own commit with a refreshed row in the table
+above.
 
 This is intentionally a small project. Once the four stages are done and
 the flame graphs land, it stops growing. The README and the `docs/` are

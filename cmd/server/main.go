@@ -41,7 +41,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, databaseURL)
+	pool, err := newTunedPool(ctx, databaseURL)
 	if err != nil {
 		logger.Error("connect to Postgres", "error", err)
 		os.Exit(1)
@@ -85,4 +85,37 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("tinylink stopped cleanly")
+}
+
+// newTunedPool creates a pgxpool.Pool with explicit settings tuned for
+// hot-path lookups. Defaults from pgxpool.New are fine for a getting-
+// started script but quickly become the bottleneck under load:
+//
+//   - MaxConns: pgx defaults to GOMAXPROCS (often 4-16). Under load
+//     the pool drains and requests serialise on acquisition. The
+//     stage-1 setting matches the rule "≈ 2-3 × CPU cores" that pgx
+//     docs recommend and that we validated with k6 in benchmarks/.
+//   - MinConns: keep a small warm pool so the first burst after a
+//     quiet minute does not pay TCP+TLS startup latency for every
+//     request.
+//   - MaxConnLifetime: rotate connections occasionally so a pgbouncer
+//     restart or PG failover does not strand stale handles.
+//   - MaxConnIdleTime: trim down to MinConns after a quiet period.
+//   - HealthCheckPeriod: catch dead connections proactively, before
+//     they surface as a request error.
+//
+// The exact numbers are deliberately conservative; the point of this
+// file is the *shape* of a production-ready pool config, not the
+// peak-RPS hero number.
+func newTunedPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConns = 20
+	cfg.MinConns = 4
+	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.MaxConnIdleTime = 5 * time.Minute
+	cfg.HealthCheckPeriod = 1 * time.Minute
+	return pgxpool.NewWithConfig(ctx, cfg)
 }
