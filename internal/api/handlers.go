@@ -5,12 +5,14 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +20,37 @@ import (
 
 	"github.com/goncharovart/tinylink/internal/shortener"
 	"github.com/goncharovart/tinylink/internal/storage"
+)
+
+// Stage-3 (sync.Pool + escape-analysis): three pools cover the hot
+// allocations identified by `go build -gcflags="-m=2"` in stage 2:
+//
+//   - createRequestPool: the JSON decode target for POST /links.
+//     Decoded into pointer form so the value does not escape via
+//     interface{} into json.NewDecoder.
+//   - createResponsePool: the encode source for the 201 reply.
+//     Without the pool, every successful create allocates a fresh
+//     struct that escapes through the encoder's interface{} arg.
+//   - responseBufferPool: bytes.Buffer reused for marshalling the
+//     response so we don't pay an allocation + Write through the
+//     ResponseWriter directly via json.NewEncoder.
+//
+// All three are sync.Pool-backed, so under steady load the
+// per-request allocation count drops to single digits for the
+// success path (vs ~7 in stage 2).
+var (
+	createRequestPool = sync.Pool{
+		New: func() any { return new(createRequest) },
+	}
+	createResponsePool = sync.Pool{
+		New: func() any { return new(createResponse) },
+	}
+	responseBufferPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
+	errorResponsePool = sync.Pool{
+		New: func() any { return new(errorResponse) },
+	}
 )
 
 // Config is the small bag of dependencies the API needs to run.
@@ -75,8 +108,14 @@ type createResponse struct {
 
 func handleCreate(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req createRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req := createRequestPool.Get().(*createRequest)
+		req.URL = "" // sync.Pool returns reused values; reset before Decode
+		defer func() {
+			req.URL = ""
+			createRequestPool.Put(req)
+		}()
+
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
@@ -111,11 +150,13 @@ func handleCreate(cfg Config) http.HandlerFunc {
 				if host == "" {
 					host = "tinylink.local"
 				}
-				writeJSON(w, http.StatusCreated, createResponse{
-					Code:      link.Code,
-					ShortURL:  "http://" + host + "/" + link.Code,
-					CreatedAt: link.CreatedAt.UTC().Format(time.RFC3339),
-				})
+				resp := createResponsePool.Get().(*createResponse)
+				resp.Code = link.Code
+				resp.ShortURL = "http://" + host + "/" + link.Code
+				resp.CreatedAt = link.CreatedAt.UTC().Format(time.RFC3339)
+				writeJSONPooled(w, http.StatusCreated, resp)
+				resp.Code, resp.ShortURL, resp.CreatedAt = "", "", ""
+				createResponsePool.Put(resp)
 				return
 			}
 			if errors.Is(err, storage.ErrCodeTaken) {
@@ -160,12 +201,39 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// writeJSON marshals an arbitrary value. It still exists for callers
+// that don't go through a pool (none right now in hot paths).
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// writeJSONPooled uses a pooled bytes.Buffer to avoid the alloc that
+// json.NewEncoder(w).Encode performs internally. The hot create path
+// uses this helper.
+func writeJSONPooled(w http.ResponseWriter, status int, body any) {
+	buf := responseBufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		responseBufferPool.Put(buf)
+	}()
+	if err := json.NewEncoder(buf).Encode(body); err != nil {
+		// Encoding shouldn't fail for our value types; if it does,
+		// the response is partially written and the client gets a
+		// 500-class error from a re-issued writeError attempt.
+		writeError(w, http.StatusInternalServerError, "could not encode response")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
+}
+
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorResponse{Error: message})
+	e := errorResponsePool.Get().(*errorResponse)
+	e.Error = message
+	writeJSONPooled(w, status, e)
+	e.Error = ""
+	errorResponsePool.Put(e)
 }

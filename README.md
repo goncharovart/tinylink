@@ -98,12 +98,31 @@ Postgres repo with a 60 s read-through cache:
 - On any cache backend error the wrapper logs and continues to
   storage, so the redirect path stays correct even when Redis is down.
 
+**Stage 3 (`sync.Pool` + escape-analysis fixes) is the final stage.**
+Four package-level pools cover the allocations identified by
+`go build -gcflags="-m=2"` in stage 2:
+
+- `createRequestPool` — JSON decode target for `POST /links`.
+- `createResponsePool` — 201 reply struct.
+- `responseBufferPool` — `bytes.Buffer` reused for marshalling, so
+  the response no longer pays a per-request `json.NewEncoder` alloc.
+- `errorResponsePool` — same trick for 4xx/5xx bodies.
+
+After stage 3, escape analysis on the hot create path shows only
+cold-start `sync.Pool.New` allocations — none on subsequent requests.
+The encoder itself now stack-allocates (`&json.Encoder{...} does not
+escape`) because we feed it a buffer we own.
+
+Full walkthrough with quoted compiler output:
+[docs/stage3-escape-analysis.md](docs/stage3-escape-analysis.md).
+
 ```bash
 docker compose -f deploy/docker-compose.yml up -d
 k6 run benchmarks/redirect-load.js
 ```
 
-Stage 3 (`sync.Pool` + escape-analysis fixes) is next.
+The four-stage table at the top of this file is the artifact this
+project produces. Numbers land as each stage's k6 run is recorded.
 
 This is intentionally a small project. Once the four stages are done and
 the flame graphs land, it stops growing. The README and the `docs/` are
