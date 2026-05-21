@@ -5,9 +5,10 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/goncharovart/tinylink.svg)](https://pkg.go.dev/github.com/goncharovart/tinylink)
 [![Go Report Card](https://goreportcard.com/badge/github.com/goncharovart/tinylink)](https://goreportcard.com/report/github.com/goncharovart/tinylink)
 [![CI](https://github.com/goncharovart/tinylink/actions/workflows/ci.yml/badge.svg)](https://github.com/goncharovart/tinylink/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/goncharovart/tinylink?sort=semver&display_name=tag&color=blue)](https://github.com/goncharovart/tinylink/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> ⚠️ Pre-release. Built openly as a portfolio project. See [Status](#status) for current state.
+> 🚧 `v0.1.0` is tagged with the complete 4-stage walkthrough. Open issues track stage 4+ work and alternative backends.
 
 A small, honest URL-shortening service that exists for one reason: to make the
 performance work visible. Every optimization is a separate commit, every step
