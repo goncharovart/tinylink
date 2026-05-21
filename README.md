@@ -87,9 +87,23 @@ docker compose -f deploy/docker-compose.yml up -d
 k6 run --env BASE=http://localhost:8080 benchmarks/redirect-load.js
 ```
 
-Stage 2 (Redis cache-aside) and stage 3 (`sync.Pool` + escape-analysis
-fixes) are next — each its own commit with a refreshed row in the table
-above.
+**Stage 2 (Redis cache-aside) is also in.** A `CachedRepo` wraps the
+Postgres repo with a 60 s read-through cache:
+
+- `Get` consults Redis first; on miss it falls through to Postgres and
+  writes back to the cache.
+- `Save` deliberately skips the cache write — the first `Get` will
+  populate it. That keeps a flaky Redis from turning into a failed
+  link creation.
+- On any cache backend error the wrapper logs and continues to
+  storage, so the redirect path stays correct even when Redis is down.
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+k6 run benchmarks/redirect-load.js
+```
+
+Stage 3 (`sync.Pool` + escape-analysis fixes) is next.
 
 This is intentionally a small project. Once the four stages are done and
 the flame graphs land, it stops growing. The README and the `docs/` are
