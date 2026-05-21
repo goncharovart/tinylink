@@ -7,6 +7,7 @@
 [![CI](https://github.com/goncharovart/tinylink/actions/workflows/ci.yml/badge.svg)](https://github.com/goncharovart/tinylink/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/goncharovart/tinylink?sort=semver&display_name=tag&color=blue)](https://github.com/goncharovart/tinylink/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![README (Русский)](https://img.shields.io/badge/README-Русский-red.svg)](README.ru.md)
 
 > 🚧 `v0.1.0` is tagged with the complete 4-stage walkthrough. Open issues track stage 4+ work and alternative backends.
 
