@@ -3,9 +3,9 @@
 //
 // Base62 uses [0-9A-Za-z]; collisions are impossible by construction
 // because each input integer has a unique encoding. Generators that
-// guarantee uniqueness of the integer input (e.g. a Postgres sequence
-// or a snowflake-style ID) compose with this package without further
-// collision handling.
+// guarantee uniqueness of the integer input (e.g. a Postgres sequence,
+// a snowflake-style ID, or the in-process Monotonic allocator from
+// stage 5) compose with this package without further collision handling.
 package shortener
 
 import (
